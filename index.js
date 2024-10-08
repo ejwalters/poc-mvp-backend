@@ -11,7 +11,7 @@ const cors = require('cors');  // Importing cors
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 5001;
 
 // Enable CORS for the React frontend running on localhost:3000
 app.use(cors({
@@ -57,13 +57,13 @@ app.post('/login', [
 
     // Generate JWT token, including the user's access level and role
     const token = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
+      {
+        id: user.id,
+        email: user.email,
         access: user.access,   // Include access level in the JWT payload
         role: user.role        // Include role in the JWT payload
-      }, 
-      JWT_SECRET, 
+      },
+      JWT_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -137,12 +137,63 @@ app.post('/users', [
   }
 });
 
+// Protected route: Get all deals (only deals the user is allowed to see)
+app.get('/deals', authenticateToken, async (req, res) => {
+  try {
+    let result;
+    console.log(req.user.access);
+    console.log(req.user.id);
+    // Sellers: See only deals they created
+    if (req.user.access === 'seller') {
+      result = await pool.query('SELECT * FROM deals WHERE created_by = $1', [req.user.id]);
+
+      // Sales Engineers: See deals they created or shared with them
+    } else if (req.user.access === 'sales_engineer') {
+      result = await pool.query(
+        `SELECT * FROM deals 
+         WHERE created_by = $1 OR id IN (SELECT deal_id FROM deal_shared_users WHERE user_id = $1)`,
+        [req.user.id]
+      );
+
+      // Managers: See deals from their team
+    } else if (req.user.access === 'manager') {
+      result = await pool.query(
+        `SELECT d.* FROM deals d 
+         JOIN users u ON d.created_by = u.id 
+         JOIN team_members tm ON u.id = tm.user_id 
+         JOIN teams t ON tm.team_id = t.team_id 
+         WHERE t.manager_id = $1`,
+        [req.user.id]
+      );
+
+      // Customers: See only deals shared with them
+    } else if (req.user.access === 'customer') {
+      result = await pool.query(
+        `SELECT * FROM deals 
+         WHERE id IN (SELECT deal_id FROM deal_shared_users WHERE user_id = $1)`,
+        [req.user.id]
+      );
+
+    } else {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
 // Protected route: Get all PoCs
 app.get('/pocs', async (req, res) => {
+  console.log(req.user);
   try {
     // Example of access-level filtering
     if (req.user.access === 'manager') {
-      const result = await pool.query('SELECT * FROM pocs WHERE team_id = $1', [req.user.id]);
+      const result = await pool.query('SELECT * FROM pocs WHERE created_by = $1', [req.user.id]);
       res.status(200).json(result.rows);
     } else if (req.user.access === 'sales_engineer') {
       const result = await pool.query('SELECT * FROM pocs WHERE created_by = $1', [req.user.id]);
