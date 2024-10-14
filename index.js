@@ -75,6 +75,70 @@ app.post('/login', [
   }
 });
 
+// Get milestones for a specific deal
+app.get('/deals/:id/milestones', authenticateToken, async (req, res) => {
+  const dealId = req.params.id;
+
+  try {
+    // Fetch all milestones where deal_id matches the given dealId
+    const result = await pool.query('SELECT * FROM deal_milestone WHERE deal_id = $1', [dealId]);
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Creating a note for a deal
+app.post('/deals/:id/notes', authenticateToken, async (req, res) => {
+  const { id } = req.params; // deal ID
+  const { content, title, isShared } = req.body; // include title in request body
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO deal_notes (deal_id, content, title, is_shared, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING *`,
+      [id, content, title || 'Untitled Note', isShared]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating note:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+
+app.get('/deals/:id/notes', authenticateToken, async (req, res) => {
+  const dealId = req.params.id;
+
+  try {
+    const result = await pool.query('SELECT * FROM deal_notes WHERE deal_id = $1', [dealId]);
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/notes/:id/share', authenticateToken, async (req, res) => {
+  const noteId = req.params.id;
+  const { sharedWithUserId } = req.body;
+
+  try {
+    await pool.query(
+      'INSERT INTO shared_notes (note_id, shared_with_user_id) VALUES ($1, $2)',
+      [noteId, sharedWithUserId]
+    );
+    res.status(200).json({ message: 'Note shared successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
 // JWT Middleware to verify tokens
 function authenticateToken(req, res, next) {
   const token = req.header('Authorization')?.split(' ')[1];
@@ -179,6 +243,23 @@ app.get('/deals', authenticateToken, async (req, res) => {
     }
 
     res.status(200).json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/deals/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query('SELECT * FROM deals WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Deal not found' });
+    }
+
+    res.status(200).json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
