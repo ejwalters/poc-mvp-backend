@@ -445,6 +445,70 @@ app.get('/pocs/:id/success_criteria', authenticateToken, async (req, res) => {
   }
 });
 
+// New Route: Get current deal status with ownership/shared check
+app.get('/deals/:dealId/status', authenticateToken, async (req, res) => {
+  const { dealId } = req.params;
+  const userId = req.user.id;  // Get the authenticated user ID from the JWT
+
+  try {
+    // First, check if the user has permission to view this deal (ownership or shared)
+    const dealAccessCheck = await pool.query(
+      `SELECT * FROM deals WHERE id = $1 AND (owner_id = $2 OR id IN (
+         SELECT deal_id FROM deal_shared_users WHERE user_id = $2
+       ))`,
+      [dealId, userId]
+    );
+
+    if (dealAccessCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'You do not have permission to view this deal.' });
+    }
+
+    // Fetch the current status for the deal
+    const statusResult = await pool.query(
+      `SELECT current_stage, updated_by, updated_at 
+       FROM deal_statuses 
+       WHERE deal_id = $1 AND is_current = TRUE`,
+      [dealId]
+    );
+
+    if (statusResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No current status found for this deal.' });
+    }
+
+    // Return the current status
+    res.status(200).json({
+      deal_id: dealId,
+      current_stage: statusResult.rows[0].current_stage,
+      updated_by: statusResult.rows[0].updated_by,
+      updated_at: statusResult.rows[0].updated_at,
+    });
+  } catch (error) {
+    console.error('Error fetching current deal status:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Server route to fetch stakeholders for a specific deal
+// Server route to fetch only external stakeholders for a specific deal
+app.get('/deals/:id/stakeholders', authenticateToken, async (req, res) => {
+  const dealId = req.params.id;
+
+  try {
+    // Query to get external stakeholders
+    const result = await pool.query(
+      `SELECT ds.id, ds.stakeholder_name, ds.role, ds.status
+           FROM deal_stakeholders ds
+           WHERE ds.deal_id = $1`,
+      [dealId]
+    );
+
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Error fetching stakeholders:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
 
