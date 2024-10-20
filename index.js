@@ -172,6 +172,24 @@ app.get('/users', async (req, res) => {
   }
 });
 
+// Get the current authenticated user's data
+app.get('/user', authenticateToken, async (req, res) => {
+  try {
+    // Fetch the user by the ID stored in the token (req.user.id)
+    const result = await pool.query('SELECT id, email, first_name, last_name, role, access FROM users WHERE id = $1', [req.user.id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json(result.rows[0]); // Return the user data
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 // Protected route: Create a new user
 app.post('/users', [
   body('email').isEmail().withMessage('Please enter a valid email address'),
@@ -265,6 +283,72 @@ app.get('/deals/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Get threads for a specific deal
+app.get('/deals/:id/threads', authenticateToken, async (req, res) => {
+  const dealId = req.params.id;
+  const userId = req.user.id; // ID of the authenticated user
+
+  try {
+    // Check if the user has access to this deal (ownership or shared)
+    const dealAccessCheck = await pool.query(
+      `SELECT * FROM deals WHERE id = $1 AND (owner_id = $2 OR id IN (
+        SELECT deal_id FROM deal_shared_users WHERE user_id = $2
+      ))`,
+      [dealId, userId]
+    );
+
+    if (dealAccessCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'You do not have access to this deal.' });
+    }
+
+    // Fetch threads for this deal
+    const result = await pool.query('SELECT * FROM deal_threads WHERE deal_id = $1', [dealId]);
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Error fetching threads:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get messages for a specific thread
+// Get messages for a specific thread with sender's first and last name
+app.get('/threads/:id/messages', authenticateToken, async (req, res) => {
+  const threadId = req.params.id;
+  const userId = req.user.id; // ID of the authenticated user
+
+  try {
+    // Check if the user has access to the thread by verifying the deal access
+    const threadCheck = await pool.query(
+      `SELECT * FROM deal_threads dt
+       JOIN deals d ON dt.deal_id = d.id
+       WHERE dt.id = $1 AND (d.owner_id = $2 OR d.id IN (
+         SELECT deal_id FROM deal_shared_users WHERE user_id = $2
+       ))`,
+      [threadId, userId]
+    );
+
+    if (threadCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'You do not have access to this thread.' });
+    }
+
+    // Fetch messages for this thread and join with the users table to get sender info
+    const result = await pool.query(`
+      SELECT dm.*, u.first_name, u.last_name
+      FROM deal_messages dm
+      JOIN users u ON dm.sender_id = u.id
+      WHERE dm.thread_id = $1
+    `, [threadId]);
+
+    res.status(200).json(result.rows);  // Send the messages with sender info back to the client
+  } catch (err) {
+    console.error('Error fetching messages:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
 
 
 
