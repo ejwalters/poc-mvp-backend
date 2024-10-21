@@ -327,6 +327,45 @@ app.get('/deals/:id/threads', authenticateToken, async (req, res) => {
   }
 });
 
+// Server-side code (e.g., in Express.js)
+// Server-side code (e.g., in Express.js)
+app.post('/threads', authenticateToken, async (req, res) => {
+  const { subject, initialMessage, deal_id, user_id } = req.body;
+
+  try {
+    // Insert the new thread into the deal_threads table
+    const threadResult = await pool.query(
+      `INSERT INTO deal_threads (subject, deal_id, created_by, last_message_date) 
+          VALUES ($1, $2, $3, NOW()) RETURNING *`,
+      [subject, deal_id, user_id]
+    );
+
+    const newThread = threadResult.rows[0];
+
+    // Insert the initial message into the deal_messages table
+    await pool.query(
+      `INSERT INTO deal_messages (thread_id, sender_id, content, created_at) 
+          VALUES ($1, $2, $3, NOW())`,
+      [newThread.id, user_id, initialMessage]
+    );
+
+    // Update the last_message_date in the deal_threads table with the current timestamp
+    await pool.query(
+      `UPDATE deal_threads 
+          SET last_message_date = NOW() 
+          WHERE id = $1`,
+      [newThread.id]
+    );
+
+    res.status(201).json(newThread);  // Return the newly created thread
+  } catch (error) {
+    console.error('Error creating new thread:', error);
+    res.status(500).json({ message: 'Error creating new thread' });
+  }
+});
+
+
+
 
 
 // Get messages for a specific thread
